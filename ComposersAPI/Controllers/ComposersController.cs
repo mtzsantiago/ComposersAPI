@@ -1,6 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using System.Collections.Generic;
-using System.Linq;
+using System.Data.SqlClient;
 
 namespace ClassicalComposersAPI.Controllers
 {
@@ -8,51 +8,93 @@ namespace ClassicalComposersAPI.Controllers
     [ApiController]
     public class ComposersController : ControllerBase
     {
-        private static List<Composer> Composers = new List<Composer>
+        private readonly string _connectionString;
+
+        public ComposersController(IConfiguration configuration)
         {
-            new Composer { Id = 1, Nombre = "Ludwig van Beethoven", Era = "Classical/Romantic", ObrasNotables = "Symphony No. 9, Moonlight Sonata" },
-            new Composer { Id = 2, Nombre = "Johann Sebastian Bach", Era = "Baroque", ObrasNotables = "Toccata and Fugue in D Minor, Brandenburg Concertos" },
-            new Composer { Id = 3, Nombre = "Wolfgang Amadeus Mozart", Era = "Classical", ObrasNotables = "Requiem, The Magic Flute" }
-        };
+            _connectionString = configuration.GetConnectionString("DefaultConnection") ?? throw new ArgumentNullException(nameof(_connectionString));
+        }
 
         // GET: api/composers
         [HttpGet]
         public ActionResult<IEnumerable<Composer>> GetComposers()
         {
-            return Ok(Composers);
+            var composers = new List<Composer>();
+            using (SqlConnection conn = new SqlConnection(_connectionString))
+            {
+                conn.Open();
+                SqlCommand cmd = new SqlCommand("SELECT * FROM composers", conn);
+                SqlDataReader reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    composers.Add(new Composer
+                    {
+                        Id = reader.GetInt32(0),
+                        Nombre = reader.GetString(1),
+                        Era = reader.GetString(2),
+                        ObrasNotables = reader.GetString(3)
+                    });
+                }
+            }
+            return Ok(composers);
         }
 
         // GET: api/composers/{id}
         [HttpGet("{id}")]
         public ActionResult<Composer> GetComposer(int id)
         {
-            var composer = Composers.FirstOrDefault(c => c.Id == id);
-            if (composer == null)
-                return NotFound();
-            return Ok(composer);
+            Composer? composer = null;
+            using (SqlConnection conn = new SqlConnection(_connectionString))
+            {
+                conn.Open();
+                SqlCommand cmd = new SqlCommand("SELECT * FROM composers WHERE id = @id", conn);
+                cmd.Parameters.AddWithValue("@id", id);
+                SqlDataReader reader = cmd.ExecuteReader();
+                if (reader.Read())
+                {
+                    composer = new Composer
+                    {
+                        Id = reader.GetInt32(0),
+                        Nombre = reader.GetString(1),
+                        Era = reader.GetString(2),
+                        ObrasNotables = reader.GetString(3)
+                    };
+                }
+            }
+            return composer != null ? Ok(composer) : NotFound();
         }
 
         // POST: api/composers
         [HttpPost]
-        public ActionResult<Composer> CreateComposer(Composer composer)
+        public IActionResult CreateComposer([FromBody] Composer composer)
         {
-            composer.Id = Composers.Count + 1;
-            Composers.Add(composer);
-            return CreatedAtAction(nameof(GetComposer), new { id = composer.Id }, composer);
+            using (SqlConnection conn = new SqlConnection(_connectionString))
+            {
+                conn.Open();
+                SqlCommand cmd = new SqlCommand("INSERT INTO composers (nombre, era, obras_notables) VALUES (@nombre, @era, @obrasNotables)", conn);
+                cmd.Parameters.AddWithValue("@nombre", composer.Nombre);
+                cmd.Parameters.AddWithValue("@era", composer.Era);
+                cmd.Parameters.AddWithValue("@obrasNotables", composer.ObrasNotables);
+                cmd.ExecuteNonQuery();
+            }
+            return CreatedAtAction(nameof(GetComposers), new { composer.Nombre }, composer);
         }
 
         // PUT: api/composers/{id}
         [HttpPut("{id}")]
-        public IActionResult UpdateComposer(int id, Composer updatedComposer)
+        public IActionResult UpdateComposer(int id, [FromBody] Composer composer)
         {
-            var composer = Composers.FirstOrDefault(c => c.Id == id);
-            if (composer == null)
-                return NotFound();
-
-            composer.Nombre = updatedComposer.Nombre;
-            composer.Era = updatedComposer.Era;
-            composer.ObrasNotables = updatedComposer.ObrasNotables;
-
+            using (SqlConnection conn = new SqlConnection(_connectionString))
+            {
+                conn.Open();
+                SqlCommand cmd = new SqlCommand("UPDATE composers SET nombre = @nombre, era = @era, obras_notables = @obrasNotables WHERE id = @id", conn);
+                cmd.Parameters.AddWithValue("@id", id);
+                cmd.Parameters.AddWithValue("@nombre", composer.Nombre);
+                cmd.Parameters.AddWithValue("@era", composer.Era);
+                cmd.Parameters.AddWithValue("@obrasNotables", composer.ObrasNotables);
+                int rowsAffected = cmd.ExecuteNonQuery();
+                if (rowsAffected == 0) return NotFound();
+            }
             return NoContent();
         }
 
@@ -60,11 +102,14 @@ namespace ClassicalComposersAPI.Controllers
         [HttpDelete("{id}")]
         public IActionResult DeleteComposer(int id)
         {
-            var composer = Composers.FirstOrDefault(c => c.Id == id);
-            if (composer == null)
-                return NotFound();
-
-            Composers.Remove(composer);
+            using (SqlConnection conn = new SqlConnection(_connectionString))
+            {
+                conn.Open();
+                SqlCommand cmd = new SqlCommand("DELETE FROM composers WHERE id = @id", conn);
+                cmd.Parameters.AddWithValue("@id", id);
+                int rowsAffected = cmd.ExecuteNonQuery();
+                if (rowsAffected == 0) return NotFound();
+            }
             return NoContent();
         }
     }
