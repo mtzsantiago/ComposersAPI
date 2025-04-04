@@ -1,3 +1,5 @@
+﻿using Asp.Versioning;
+using Asp.Versioning.ApiExplorer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -5,37 +7,47 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// 🔐 Clave secreta JWT (puedes moverla a appsettings o env var en prod)
+var key = Encoding.ASCII.GetBytes("YourSuperSecretKeyWithAtLeast32Characters");
 
-// ?? Clave secreta para firmar los tokens JWT
-var key = Encoding.ASCII.GetBytes("YourSuperSecretKeyWithAtLeast32Characters"); // ?? Aseg�rate que sea igual en AuthController
+// ✅ Controladores
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
 
-// ?? Configuraci�n de autenticaci�n JWT
-builder.Services.AddAuthentication(options =>
-{
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-})
-
-.AddJwtBearer(options =>
-{
-    options.RequireHttpsMetadata = false;
-    options.SaveToken = true;
-    options.TokenValidationParameters = new TokenValidationParameters
+// ✅ Versionado de la API
+builder.Services
+    .AddApiVersioning(options =>
     {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(key),
-        ValidateIssuer = false,
-        ValidateAudience = false
-    };
-});
+        options.DefaultApiVersion = new ApiVersion(1, 0); // v1 por defecto
+        options.AssumeDefaultVersionWhenUnspecified = true;
+        options.ReportApiVersions = true;
+        options.ApiVersionReader = new UrlSegmentApiVersionReader(); // /api/v1/...
+    })
+    .AddMvc()
+    .AddApiExplorer(options =>
+    {
+        options.GroupNameFormat = "'v'VVV"; // muestra v1, v2, etc.
+        options.SubstituteApiVersionInUrl = true;
+    });
 
-// ?? Configuraci�n de Swagger con soporte para JWT
-builder.Services.AddSwaggerGen(c =>
+// ✅ Swagger con múltiples versiones + JWT
+builder.Services.AddSwaggerGen(options =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo { Title = "ApiPokemonListas", Version = "v1" });
+    // 👇 Se resuelve más adelante con provider real
+    var provider = builder.Services.BuildServiceProvider()
+        .GetRequiredService<IApiVersionDescriptionProvider>();
 
-    // Define el esquema de seguridad JWT
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    foreach (var description in provider.ApiVersionDescriptions)
+    {
+        options.SwaggerDoc(description.GroupName, new OpenApiInfo
+        {
+            Title = $"ApiComposerListas {description.ApiVersion}",
+            Version = description.GroupName
+        });
+    }
+
+    // 🔐 Soporte para JWT
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Description = "Introduce tu token JWT con el prefijo 'Bearer'. Ejemplo: Bearer {token}",
         Name = "Authorization",
@@ -44,8 +56,7 @@ builder.Services.AddSwaggerGen(c =>
         Scheme = "Bearer"
     });
 
-    // Aplica el esquema a todas las operaciones
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
             new OpenApiSecurityScheme
@@ -61,40 +72,46 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-builder.WebHost.UseKestrel(options =>
+// ✅ Autenticación JWT
+builder.Services.AddAuthentication(options =>
 {
-    options.ListenAnyIP(7049);
-    options.ListenAnyIP(7050, listenOptions => listenOptions.UseHttps());
-});
-
-// Add services
-builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-
-builder.Services.AddCors(options =>
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
 {
-    options.AddPolicy("AllowAll", builder =>
+    options.RequireHttpsMetadata = false;
+    options.SaveToken = true;
+    options.TokenValidationParameters = new TokenValidationParameters
     {
-        builder.AllowAnyOrigin()
-               .AllowAnyMethod()
-               .AllowAnyHeader();
-    });
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = new SymmetricSecurityKey(key),
+        ValidateIssuer = false,
+        ValidateAudience = false
+    };
 });
 
 var app = builder.Build();
 
+// ✅ Middleware
 if (app.Environment.IsDevelopment())
 {
+    var apiVersionProvider = app.Services.GetRequiredService<IApiVersionDescriptionProvider>();
+
     app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwaggerUI(options =>
+    {
+        foreach (var description in apiVersionProvider.ApiVersionDescriptions)
+        {
+            options.SwaggerEndpoint(
+                $"/swagger/{description.GroupName}/swagger.json",
+                description.GroupName.ToUpperInvariant());
+        }
+    });
 }
 
-// Force HTTPS redirection
 app.UseHttpsRedirection();
-
-app.UseCors("AllowAll");
-
+app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.Run();

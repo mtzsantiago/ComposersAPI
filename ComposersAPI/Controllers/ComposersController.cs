@@ -1,11 +1,13 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using System.Collections.Generic;
 using System.Data.SqlClient;
+using ComposersAPI.Models;
 
 namespace ClassicalComposersAPI.Controllers
 {
-    [Route("api/[controller]")]
     [ApiController]
+    [Route("api/v{version:apiVersion}/[controller]")]  // Versioning in the route
+    [ApiVersion("1.0")]  // Specify the version for this controller
     public class ComposersController : ControllerBase
     {
         private readonly string _connectionString;
@@ -114,11 +116,5 @@ namespace ClassicalComposersAPI.Controllers
         }
     }
 
-    public class Composer
-    {
-        public int Id { get; set; }
-        public string Nombre { get; set; }
-        public string Era { get; set; }
-        public string ObrasNotables { get; set; }
-    }
+    
 }
